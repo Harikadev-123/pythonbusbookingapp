@@ -1,0 +1,340 @@
+# File: app.py (Flask Web Version - NOT Tkinter)
+from flask import Flask, render_template_string, request, jsonify
+import random
+
+app = Flask(__name__)
+
+# HTML Template
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>BusEase - Book Bus Tickets</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .header h1 { color: #667eea; font-size: 48px; margin-bottom: 10px; }
+        .search-card {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; color: #555; }
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-top: 10px;
+            width: 100%;
+        }
+        button:hover { background: #764ba2; }
+        .bus-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: transform 0.2s;
+        }
+        .bus-card:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        .seat-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .seat {
+            padding: 10px;
+            text-align: center;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .seat:hover { transform: scale(1.05); }
+        .seat.available { background: #4caf50; color: white; }
+        .seat.selected { background: #2196f3; color: white; }
+        .seat.booked { background: #f44336; color: white; cursor: not-allowed; opacity: 0.6; }
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            max-width: 500px;
+            width: 90%;
+        }
+        h2 { color: #333; margin-bottom: 15px; }
+        .results-title { margin: 20px 0 15px 0; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚌 BusEase</h1>
+            <p>Book your bus tickets online - Fast & Secure</p>
+        </div>
+
+        <div class="search-card">
+            <h2>🔍 Search Buses</h2>
+            <form id="searchForm">
+                <div class="form-group">
+                    <label>From:</label>
+                    <select name="from_city" required>
+                        <option value="">Select City</option>
+                        <option>New York</option><option>Boston</option>
+                        <option>Washington DC</option><option>Chicago</option>
+                        <option>Los Angeles</option><option>San Francisco</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>To:</label>
+                    <select name="to_city" required>
+                        <option value="">Select City</option>
+                        <option>New York</option><option>Boston</option>
+                        <option>Washington DC</option><option>Chicago</option>
+                        <option>Los Angeles</option><option>San Francisco</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Date:</label>
+                    <input type="date" name="date" required>
+                </div>
+                <button type="submit">Search Buses</button>
+            </form>
+        </div>
+
+        <div id="results"></div>
+    </div>
+    <div id="modal" class="modal"></div>
+
+    <script>
+        // Set min date to today
+        const today = new Date().toISOString().split('T')[0];
+        const dateInput = document.querySelector('input[name="date"]');
+        if(dateInput) {
+            dateInput.min = today;
+            dateInput.value = today;
+        }
+
+        document.getElementById('searchForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const response = await fetch('/search', { method: 'POST', body: formData });
+            const buses = await response.json();
+            displayBuses(buses);
+        });
+
+        function displayBuses(buses) {
+            const resultsDiv = document.getElementById('results');
+            if(buses.length === 0) {
+                resultsDiv.innerHTML = '<div class="bus-card">❌ No buses found for this route</div>';
+                return;
+            }
+            resultsDiv.innerHTML = '<h2 class="results-title">🎫 Available Buses</h2>' + buses.map(bus => `
+                <div class="bus-card">
+                    <div>
+                        <h3>🚍 ${bus.name}</h3>
+                        <p>${bus.from} → ${bus.to} | ${bus.time} | ${bus.duration}</p>
+                        <p>✨ Amenities: ${bus.amenities.join(', ')}</p>
+                    </div>
+                    <div>
+                        <h2>₹${bus.price}</h2>
+                        <button onclick="selectBus(${bus.id})">Select Bus</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function selectBus(busId) {
+            const response = await fetch(`/bus/${busId}`);
+            const bus = await response.json();
+            showSeatSelection(bus);
+        }
+
+        function showSeatSelection(bus) {
+            const modal = document.getElementById('modal');
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h2>🎫 Select Seats - ${bus.name}</h2>
+                    <div class="seat-grid">
+                        ${bus.seats.map(seat => `
+                            <div class="seat ${seat.status}" data-seat="${seat.number}" onclick="toggleSeat(this, ${bus.id}, ${seat.number})">
+                                ${seat.number}
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button onclick="bookSeats(${bus.id})">Confirm Booking</button>
+                    <button onclick="closeModal()">Close</button>
+                </div>
+            `;
+            modal.style.display = 'flex';
+        }
+
+        function toggleSeat(element, busId, seatNumber) {
+            if(element.classList.contains('booked')) return;
+            if(element.classList.contains('available')) {
+                element.classList.remove('available');
+                element.classList.add('selected');
+            } else if(element.classList.contains('selected')) {
+                element.classList.remove('selected');
+                element.classList.add('available');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('modal').style.display = 'none';
+        }
+
+        async function bookSeats(busId) {
+            const selectedSeats = Array.from(document.querySelectorAll('.seat.selected')).map(seat => seat.textContent);
+            if(selectedSeats.length === 0) {
+                alert('Please select at least one seat');
+                return;
+            }
+
+            const response = await fetch('/book', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bus_id: busId, seats: selectedSeats })
+            });
+            const result = await response.json();
+            alert(result.message);
+            closeModal();
+            document.getElementById('searchForm').dispatchEvent(new Event('submit'));
+        }
+    </script>
+</body>
+</html>
+"""
+
+# Generate bus data
+def generate_buses():
+    buses = []
+    routes = [
+        ("New York", "Boston", "08:00 AM", "4h", 45, ['AC', 'WiFi', 'Snacks']),
+        ("New York", "Washington DC", "09:30 AM", "5h", 55, ['AC', 'WiFi', 'Water Bottle']),
+        ("Boston", "New York", "10:00 AM", "4h", 45, ['AC', 'USB Ports', 'Snacks']),
+        ("New York", "Chicago", "11:00 PM", "12h", 85, ['Sleeper', 'AC', 'Meal']),
+        ("Los Angeles", "San Francisco", "07:00 AM", "6h", 65, ['AC', 'WiFi', 'Entertainment']),
+        ("Chicago", "New York", "08:30 PM", "12h", 85, ['Sleeper', 'AC', 'WiFi']),
+    ]
+
+    for i, (frm, to, time, duration, price, amenities) in enumerate(routes, 1):
+        seats = []
+        for j in range(1, 41):
+            # 70% available, 30% booked for demo
+            status = 'available' if random.random() > 0.3 else 'booked'
+            seats.append({'number': j, 'status': status})
+
+        buses.append({
+            'id': i,
+            'name': f"Express {i}",
+            'from': frm,
+            'to': to,
+            'time': time,
+            'duration': duration,
+            'price': price,
+            'amenities': amenities,
+            'seats': seats
+        })
+    return buses
+
+buses_data = generate_buses()
+
+@app.route('/')
+def index():
+    return render_template_string(HTML_TEMPLATE)
+
+@app.route('/search', methods=['POST'])
+def search():
+    from_city = request.form.get('from_city')
+    to_city = request.form.get('to_city')
+
+    matching_buses = [
+        bus for bus in buses_data
+        if bus['from'] == from_city and bus['to'] == to_city
+    ]
+
+    # Return only bus info (without seat details for performance)
+    result = [{
+        'id': bus['id'],
+        'name': bus['name'],
+        'from': bus['from'],
+        'to': bus['to'],
+        'time': bus['time'],
+        'duration': bus['duration'],
+        'price': bus['price'],
+        'amenities': bus['amenities']
+    } for bus in matching_buses]
+
+    return jsonify(result)
+
+@app.route('/bus/<int:bus_id>')
+def get_bus(bus_id):
+    bus = next((b for b in buses_data if b['id'] == bus_id), None)
+    if bus:
+        return jsonify(bus)
+    return jsonify({'error': 'Bus not found'}), 404
+
+@app.route('/book', methods=['POST'])
+def book():
+    data = request.json
+    bus_id = data.get('bus_id')
+    seats = data.get('seats', [])
+
+    bus = next((b for b in buses_data if b['id'] == bus_id), None)
+    if not bus:
+        return jsonify({'message': 'Bus not found'}), 404
+
+    # Mark seats as booked
+    for seat in bus['seats']:
+        if str(seat['number']) in seats and seat['status'] == 'available':
+            seat['status'] = 'booked'
+
+    total_amount = len(seats) * bus['price']
+    return jsonify({
+        'message': f'✅ Booking Confirmed! {len(seats)} seat(s) booked. Total: ₹{total_amount}'
+    })
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
